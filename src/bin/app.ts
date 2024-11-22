@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import * as cdk from "aws-cdk-lib";
-import { CiForgeStack } from "../lib/ci-forge-stack";
+import { CiForgeStack } from "../lib/ciForgeStack";
 
 const app = new cdk.App();
 new CiForgeStack(app, "CiForgeStack", {

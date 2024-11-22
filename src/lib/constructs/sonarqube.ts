@@ -1,10 +1,12 @@
+import path from 'path';
 import cdk from 'aws-cdk-lib';
 import codebuild from 'aws-cdk-lib/aws-codebuild';
 import ec2 from 'aws-cdk-lib/aws-ec2';
 import ecs from 'aws-cdk-lib/aws-ecs';
-import ecsp from 'aws-cdk-lib/aws-ecs-patterns';
 import efs from 'aws-cdk-lib/aws-efs';
 import elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import events from 'aws-cdk-lib/aws-events';
+import targets from 'aws-cdk-lib/aws-events-targets';
 import iam from 'aws-cdk-lib/aws-iam';
 import lambda from 'aws-cdk-lib/aws-lambda';
 import lambdanode from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -18,7 +20,8 @@ export interface SonarQubeConstructProps {
 }
 
 export class SonarQubeConstruct extends Construct {
-  public readonly service: ecsp.ApplicationLoadBalancedFargateService;
+  public readonly service: ecs.FargateService;
+  public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
   public readonly sonarSecurityGroup: ec2.SecurityGroup;
   public readonly project: codebuild.Project;
 
@@ -49,7 +52,7 @@ export class SonarQubeConstruct extends Construct {
     dbSecurityGroup.addIngressRule(
       this.sonarSecurityGroup,
       ec2.Port.tcp(DB_PORT),
-      'Allow AuroraDB connection from SonarQube security group'
+      'Allow DB connection from SonarQube security group'
     );
 
     // Allow inbound traffic to SonarQube service
@@ -135,44 +138,30 @@ export class SonarQubeConstruct extends Construct {
     dbInstance.secret?.grantRead(ecsTaskRole);
 
     // Create Application Load Balancer
-    const loadBalancer = new elbv2.ApplicationLoadBalancer(this, `${id}LoadBalancer`, {
+    this.loadBalancer = new elbv2.ApplicationLoadBalancer(this, `${id}LoadBalancer`, {
       vpc: props.vpc,
       internetFacing: true,
       securityGroup: this.sonarSecurityGroup,
     });
 
-    // Create SonarQube Fargate service
-    this.service = new ecsp.ApplicationLoadBalancedFargateService(this, `${id}SonarQubeServer`, {
-      cluster,
-      desiredCount: 1,
-      securityGroups: [this.sonarSecurityGroup],
-      taskImageOptions: {
-        image: ecs.ContainerImage.fromRegistry('sonarqube:lts-community'),
-        containerPort: SONAR_PORT,
-        environment: {
-          SONAR_CE_JAVAOPTS: '-Xmx1G -Xms1G -XX:+HeapDumpOnOutOfMemoryError',
-          SONAR_LOG_LEVEL: 'DEBUG',
-          SONAR_JDBC_URL: `jdbc:postgresql://${dbInstance.instanceEndpoint.socketAddress}/${DB_NAME}`,
-          SONAR_WEB_PORT: `${SONAR_PORT}`,
-          ES_SETTING_NODE_STORE_ALLOW__MMAP: 'false',
-        },
-        secrets: {
-          SONAR_JDBC_USERNAME: ecs.Secret.fromSecretsManager(dbInstance.secret as sm.ISecret, 'username'),
-          SONAR_JDBC_PASSWORD: ecs.Secret.fromSecretsManager(dbInstance.secret as sm.ISecret, 'password'),
-        },
-        taskRole: ecsTaskRole,
-        executionRole: ecsExecutionRole,
-      },
-      loadBalancer,
-      openListener: true,
+    // Create a listener for the ALB
+    const listener = this.loadBalancer.addListener(`${id}Listener`, {
+      port: 80,
+      open: true,
+    });
+
+    // Create Fargate Task Definition
+    const taskDefinition = new ecs.FargateTaskDefinition(this, `${id}TaskDef`, {
       memoryLimitMiB: 8192,
       cpu: 4096,
+      taskRole: ecsTaskRole,
+      executionRole: ecsExecutionRole,
     });
 
     // Add EFS volume to task definition
     const volumeName = 'sonarqube-data';
 
-    this.service.taskDefinition.addVolume({
+    taskDefinition.addVolume({
       name: volumeName,
       efsVolumeConfiguration: {
         fileSystemId: fileSystem.fileSystemId,
@@ -184,15 +173,49 @@ export class SonarQubeConstruct extends Construct {
       },
     });
 
+    // Add container to task definition
+    const container = taskDefinition.addContainer(`${id}SonarQubeContainer`, {
+      image: ecs.ContainerImage.fromRegistry('sonarqube:lts-community'),
+      memoryLimitMiB: 8192,
+      cpu: 4096,
+      environment: {
+        SONAR_CE_JAVAOPTS: '-Xmx1G -Xms1G -XX:+HeapDumpOnOutOfMemoryError',
+        SONAR_LOG_LEVEL: 'DEBUG',
+        SONAR_JDBC_URL: `jdbc:postgresql://${dbInstance.instanceEndpoint.socketAddress}/${DB_NAME}`,
+        SONAR_WEB_PORT: `${SONAR_PORT}`,
+        SONAR_SEARCH_JAVAADDITIONALOPTS: '-Dnode.store.allow_mmapfs=false',
+      },
+      secrets: {
+        SONAR_JDBC_USERNAME: ecs.Secret.fromSecretsManager(dbInstance.secret as sm.ISecret, 'username'),
+        SONAR_JDBC_PASSWORD: ecs.Secret.fromSecretsManager(dbInstance.secret as sm.ISecret, 'password'),
+      },
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'SonarQube' }),
+    });
+
     // Mount the EFS volume in the container
-    this.service.taskDefinition.defaultContainer?.addMountPoints({
+    container.addMountPoints({
       sourceVolume: volumeName,
       containerPath: '/opt/sonarqube/data',
       readOnly: false,
     });
 
+    // Expose the container port
+    container.addPortMappings({
+      containerPort: SONAR_PORT,
+      protocol: ecs.Protocol.TCP,
+    });
+
+    // Create the Fargate service
+    this.service = new ecs.FargateService(this, `${id}SonarQubeService`, {
+      cluster,
+      taskDefinition,
+      desiredCount: 1,
+      securityGroups: [this.sonarSecurityGroup],
+      assignPublicIp: false,
+    });
+
     // Allow the ECS task to use the EFS file system
-    fileSystem.connections.allowDefaultPortFrom(this.service.service.connections);
+    fileSystem.connections.allowDefaultPortFrom(this.service.connections);
 
     // Ensure the task role can mount the EFS file system
     fileSystem.grant(
@@ -200,6 +223,20 @@ export class SonarQubeConstruct extends Construct {
       'elasticfilesystem:ClientMount',
       'elasticfilesystem:ClientWrite'
     );
+
+    // Register the service with the ALB listener
+    listener.addTargets(`${id}SonarQubeTarget`, {
+      port: SONAR_PORT,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targets: [this.service],
+      healthCheck: {
+        path: '/about',
+        interval: cdk.Duration.seconds(60),
+        timeout: cdk.Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
+      },
+    });
 
     // SonarQube admin secret
     const sonarAdminSecret = new sm.Secret(this, `${id}AdminSecret`, {
@@ -245,14 +282,14 @@ export class SonarQubeConstruct extends Construct {
       vpc: props.vpc,
       securityGroups: [this.sonarSecurityGroup],
       functionName: `${id}SonarOnboardingFunction`,
-      entry: 'src/lib/lambda/sonarqubeOnboarding.lambda.ts',
+      entry: path.join(__dirname, '../lambda/sonarqubeOnboarding.lambda.ts'),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_18_X,
       timeout: cdk.Duration.minutes(15),
       retryAttempts: 0,
       role: lambdaRole,
       environment: {
-        SONAR_URL: `http://${this.service.loadBalancer.loadBalancerDnsName}`,
+        SONAR_URL: `http://${this.loadBalancer.loadBalancerDnsName}`,
         SONAR_ADMIN_SECRET_ARN: sonarAdminSecret.secretArn,
         SONAR_SERVICE_ACCOUNT_SECRET_ARN: sonarServiceAccountSecret.secretArn,
       },
@@ -291,12 +328,12 @@ export class SonarQubeConstruct extends Construct {
     // CodeBuild project for running SonarQube analysis
     this.project = new codebuild.Project(this, `${id}Project`, {
       vpc: props.vpc,
+      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [this.sonarSecurityGroup],
       badge: true,
       source: codebuild.Source.gitHub({
         owner: 'spring-projects',
         repo: 'spring-petclinic',
-        webhook: true,
       }),
       projectName: `${id}SonarQubeAnalyzeProject`,
       description: 'CodeBuild project for SonarQube analysis of Petclinic',
@@ -307,7 +344,7 @@ export class SonarQubeConstruct extends Construct {
         environmentVariables: {
           SONAR_HOST_URL: {
             type: codebuild.BuildEnvironmentVariableType.PLAINTEXT,
-            value: `http://${this.service.loadBalancer.loadBalancerDnsName}`,
+            value: `http://${this.loadBalancer.loadBalancerDnsName}`,
           },
           SONAR_LOGIN_SECRET_NAME: {
             type: codebuild.BuildEnvironmentVariableType.PLAINTEXT,
@@ -316,6 +353,12 @@ export class SonarQubeConstruct extends Construct {
         },
       },
       role: codeBuildRole,
+    });
+
+    // Trigger CodeBuild project hourly
+    new events.Rule(this, `${id}HourlyBuildTrigger`, {
+      schedule: events.Schedule.rate(cdk.Duration.hours(1)),
+      targets: [new targets.CodeBuildProject(this.project)],
     });
   }
 }
