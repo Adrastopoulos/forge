@@ -42,6 +42,7 @@ token.json
 dist/
 .next
 out
+cdk.out
 
 # dependencies
 node_modules

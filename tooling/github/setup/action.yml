@@ -10,14 +10,8 @@ runs:
 
     - uses: actions/setup-node@v4
       with:
-        cache: "pnpm"
+        cache: 'pnpm'
         node-version-file: '.nvmrc'
-
-    - shell: bash
-      run: pnpm add -g turbo
-
-    - shell: bash
-      run: pnpm add -g vercel
 
     - shell: bash
       run: pnpm install
