@@ -1,20 +1,30 @@
 {
   "name": "forge",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "diff": "cdk diff",
+    "format": "prettier --check . --ignore-path ./.prettierignore",
+    "lint": "eslint . --ext .ts,.js",
+    "synth": "cdk synth",
+    "typecheck": "tsc --noEmit"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
+    "@ianvs/prettier-plugin-sort-imports": "^4.4.0",
+    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@typescript-eslint/parser": "^8.15.0",
     "aws-cdk-lib": "^2.170.0",
-    "constructs": "^10.4.2"
+    "aws-sdk": "^2.1692.0",
+    "axios": "^1.7.7",
+    "constructs": "^10.4.2",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0"
   },
   "devDependencies": {
+    "@types/eslint": "^9.6.1",
     "@types/node": "^22.9.1",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.3",
+    "tsx": "^4.11.0",
     "typescript": "^5.7.2"
   }
 }

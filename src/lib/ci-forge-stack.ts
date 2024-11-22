@@ -1,9 +1,10 @@
-import cdk from "aws-cdk-lib";
-import ec2 from "aws-cdk-lib/aws-ec2";
-import ecs from "aws-cdk-lib/aws-ecs";
-import { Construct } from "constructs";
-import { SonarQubeConstruct } from "./constructs/sonarqube";
-import { JenkinsConstruct } from "./constructs/jenkins";
+import cdk from 'aws-cdk-lib';
+import ec2 from 'aws-cdk-lib/aws-ec2';
+import ecs from 'aws-cdk-lib/aws-ecs';
+import { Construct } from 'constructs';
+
+import { JenkinsConstruct } from './constructs/jenkins';
+import { SonarQubeConstruct } from './constructs/sonarqube';
 
 export class CiForgeStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -24,14 +25,18 @@ export class CiForgeStack extends cdk.Stack {
     // Create SonarQube
     const sonarqube = new SonarQubeConstruct(this, `${id}Sonarqube`, {
       vpc,
-      eip,
     });
 
     // Create Jenkins
     const jenkins = new JenkinsConstruct(this, `${id}Jenkins`, {
       vpc,
-      securityGroup: sonarqube.sonarSecurityGroup,
     });
+
+    sonarqube.sonarSecurityGroup.addIngressRule(
+      ec2.Peer.securityGroupId(jenkins.jenkinsSecurityGroup.securityGroupId),
+      ec2.Port.tcp(9000),
+      'Allow Jenkins to communicate with SonarQube'
+    );
 
     // Add outputs
     new cdk.CfnOutput(this, `${id}SonarQubeUrl`, {

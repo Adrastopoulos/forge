@@ -1,0 +1,3 @@
+What are the potential build/testing stages in CI practices and explain the purpose?
+
+Coding: 1.5hrs

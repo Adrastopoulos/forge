@@ -1,0 +1,23 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      java: corretto11
+    commands:
+      - echo Installing Maven...
+      - curl -sS https://downloads.apache.org/maven/maven-3/3.8.6/binaries/apache-maven-3.8.6-bin.tar.gz | tar zx -C /tmp
+      - export PATH=/tmp/apache-maven-3.8.6/bin:$PATH
+      - echo Maven installed
+  pre_build:
+    commands:
+      - echo Retrieving SonarQube service account credentials...
+      - export SONAR_TOKEN=$(aws secretsmanager get-secret-value --secret-id $SONAR_LOGIN_SECRET_NAME --query SecretString --output text | jq -r '.token')
+      - echo SonarQube token retrieved
+  build:
+    commands:
+      - echo Starting SonarQube analysis...
+      - mvn clean verify sonar:sonar -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_TOKEN
+  post_build:
+    commands:
+      - echo Build and SonarQube analysis completed
