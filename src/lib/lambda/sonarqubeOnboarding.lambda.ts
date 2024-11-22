@@ -82,7 +82,7 @@ const createUser = async (
       auth: adminAuth,
     });
     console.log(`User ${userCredentials.username} created`);
-  } catch (error) {
+  } catch (error: any) {
     if (
       error.response &&
       error.response.status === 400 &&
