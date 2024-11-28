@@ -197,6 +197,13 @@ export class JenkinsStack extends cdk.Stack {
       - workflow-cps:latest
     `;
 
+    // Escape special characters in configContent
+    const escapedConfigContent = configContent
+      .replace(/\\/g, '\\\\')
+      .replace(/`/g, '\\`')
+      .replace(/\$/g, '\\$')
+      .replace(/"/g, '\\"');
+
     // Create a Fargate Task Definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, `${id}TaskDef`, {
       memoryLimitMiB: 4096,
@@ -207,7 +214,7 @@ export class JenkinsStack extends cdk.Stack {
 
     // Add Jenkins container to the task definition
     const container = taskDefinition.addContainer(`${id}Container`, {
-      image: ecs.ContainerImage.fromRegistry('jenkins/jenkins:lts-jdk11'),
+      image: ecs.ContainerImage.fromRegistry('jenkins/jenkins:lts'),
       containerName: 'jenkins',
       environment: {
         JAVA_OPTS: '-Djenkins.install.runSetupWizard=false',
@@ -219,27 +226,21 @@ export class JenkinsStack extends cdk.Stack {
         SONARQUBE_TOKEN: ecs.Secret.fromSecretsManager(sonarqubeTokenSecret, 'token'),
       },
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'Jenkins' }),
+      entryPoint: ['/bin/sh', '-c'],
+      command: [
+        `
+        mkdir -p /var/jenkins_home/casc_configs && \
+        echo "${escapedConfigContent}" > /var/jenkins_home/casc_configs/jenkins.yaml && \
+        jenkins-plugin-cli --plugins "configuration-as-code:latest git:latest blueocean:latest sonar:latest pipeline-github-lib:latest github:latest workflow-aggregator:latest workflow-multibranch:latest workflow-cps:latest" && \
+        /usr/bin/tini -- /usr/local/bin/jenkins.sh
+        `,
+      ],
     });
 
     container.addPortMappings({
       containerPort: JENKINS_PORT,
       protocol: ecs.Protocol.TCP,
     });
-
-    // Set the CASC_JENKINS_CONFIG environment variable
-    container.addEnvironment('CASC_JENKINS_CONFIG', '/var/jenkins_home/casc_configs/jenkins.yaml');
-
-    // Escape special characters in configContent
-    const escapedConfigContent = configContent.replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/"/g, '\\"');
-
-    // Add commands to write the CasC config and install plugins before starting Jenkins
-    container.addEntryPoint('/bin/sh', '-c');
-    container.addCommand(`
-    mkdir -p /var/jenkins_home/casc_configs && \
-    echo "${escapedConfigContent}" > /var/jenkins_home/casc_configs/jenkins.yaml && \
-    jenkins-plugin-cli --plugins "configuration-as-code:latest git:latest blueocean:latest sonar:latest pipeline-github-lib:latest github:latest workflow-aggregator:latest workflow-multibranch:latest workflow-cps:latest" && \
-    /usr/bin/tini -- /usr/local/bin/jenkins.sh
-    `);
 
     // Mount the EFS volume in the container
     taskDefinition.addVolume({
@@ -266,9 +267,9 @@ export class JenkinsStack extends cdk.Stack {
       taskDefinition,
       desiredCount: 1,
       securityGroups: [this.jenkinsSecurityGroup],
-      assignPublicIp: false,
+      assignPublicIp: true,
       vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_NAT,
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
       },
     });
 
