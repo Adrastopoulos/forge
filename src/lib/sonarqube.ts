@@ -19,17 +19,17 @@ import { Construct } from 'constructs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export interface SonarQubeStackProps extends cdk.StackProps {
+export interface SonarQubeProps extends cdk.StackProps {
   vpc: ec2.IVpc;
 }
 
-export class SonarQubeStack extends cdk.Stack {
+export class SonarQube extends cdk.Stack {
   public readonly service: ecs.FargateService;
   public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
   public readonly sonarSecurityGroup: ec2.SecurityGroup;
   public readonly project: codebuild.Project;
 
-  constructor(scope: Construct, id: string, props: SonarQubeStackProps) {
+  constructor(scope: Construct, id: string, props: SonarQubeProps) {
     super(scope, id, props);
 
     const DB_NAME = `sonarqube`;
