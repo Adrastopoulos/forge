@@ -2,8 +2,8 @@
 import * as cdk from "aws-cdk-lib";
 import { Forge as ForgeStack } from "../lib/forge";
 
-import { SonarQubeStack } from "../lib/sonarqube";
-import { JenkinsStack } from "../lib/jenkins";
+import { SonarQube } from "../lib/sonarqube";
+import { Jenkins } from "../lib/jenkins";
 
 const app = new cdk.App();
 
@@ -16,14 +16,14 @@ const forgeStack = new ForgeStack(app, "ForgeStack", {
   env
 });
 
-const sonarqube = new SonarQubeStack(app, "SonarQube", {
+const sonarqube = new SonarQube(app, "SonarQube", {
   env,
   vpc: forgeStack.vpc,
 });
 
-const jenkins = new JenkinsStack(app, "Jenkins", {
+const jenkins = new Jenkins(app, "Jenkins", {
   env,
   vpc: forgeStack.vpc,
-  sonarQubeUrl: sonarqube.loadBalancer.loadBalancerDnsName,
+  sonarqubeUrl: `http://${sonarqube.loadBalancer.loadBalancerDnsName}`,
+  sonarqubeTokenSecret: sonarqube.sonarJenkinsSecret,
 });
-

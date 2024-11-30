@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as ecrassets from 'aws-cdk-lib/aws-ecr-assets';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as efs from 'aws-cdk-lib/aws-efs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
@@ -7,17 +8,20 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
-export interface JenkinsStackProps extends cdk.StackProps {
+const __dirname = new URL('.', import.meta.url).pathname;
+
+export interface JenkinsProps extends cdk.StackProps {
   vpc: ec2.IVpc;
-  sonarQubeUrl: string;
+  sonarqubeUrl: string;
+  sonarqubeTokenSecret: secretsmanager.ISecret;
 }
 
-export class JenkinsStack extends cdk.Stack {
+export class Jenkins extends cdk.Stack {
   public readonly service: ecs.FargateService;
   public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
   public readonly jenkinsSecurityGroup: ec2.SecurityGroup;
 
-  constructor(scope: Construct, id: string, props: JenkinsStackProps) {
+  constructor(scope: Construct, id: string, props: JenkinsProps) {
     super(scope, id, props);
 
     const JENKINS_PORT = 8080;
@@ -64,20 +68,9 @@ export class JenkinsStack extends cdk.Stack {
       },
     });
 
-    // Create a secret for SonarQube token
-    const sonarqubeTokenSecret = new secretsmanager.Secret(this, `${id}SonarQubeTokenSecret`, {
-      secretName: `${id}SonarQubeTokenSecret`,
-      generateSecretString: {
-        secretStringTemplate: '{}',
-        generateStringKey: 'token',
-        excludePunctuation: false,
-        passwordLength: 32,
-      },
-    });
-
     // Grant the task role permissions to read the secrets
     adminSecret.grantRead(taskRole);
-    sonarqubeTokenSecret.grantRead(taskRole);
+    props.sonarqubeTokenSecret.grantRead(taskRole);
 
     // Create an EFS file system
     const efsSecurityGroup = new ec2.SecurityGroup(this, `${id}EfsSecurityGroup`, {
@@ -116,125 +109,41 @@ export class JenkinsStack extends cdk.Stack {
       },
     });
 
-    // Jenkins Configuration as Code (CasC) content with inline pipeline script
-    const configContent = `
-    jenkins:
-      systemMessage: "Jenkins configured automatically by Configuration as Code plugin"
-      numExecutors: 2
-      securityRealm:
-        local:
-          allowsSignup: false
-          users:
-            - id: "\${JENKINS_ADMIN_USERNAME}"
-              password: "\${JENKINS_ADMIN_PASSWORD}"
-      authorizationStrategy:
-        loggedInUsersCanDoAnything:
-          allowAnonymousRead: false
-    unclassified:
-      location:
-        url: "http://localhost/"
-    installState:
-      state: "RUNNING"
-    tool:
-      git:
-        installations:
-          - name: "Default"
-            home: "/usr/bin/git"
-    jobs:
-      - script: >
-          pipelineJob('Build-Petclinic') {
-            definition {
-              cps {
-                script("""
-                  pipeline {
-                      agent any
-                      stages {
-                          stage('Checkout') {
-                              steps {
-                                  git url: 'https://github.com/spring-projects/spring-petclinic.git', branch: 'main'
-                              }
-                          }
-                          stage('Build') {
-                              steps {
-                                  sh './mvnw clean package'
-                              }
-                          }
-                          stage('SonarQube Analysis') {
-                              environment {
-                                  SONAR_HOST_URL = '\${SONAR_HOST_URL}'
-                              }
-                              steps {
-                                  withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_LOGIN')]) {
-                                      sh './mvnw sonar:sonar -Dsonar.projectKey=spring-petclinic -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_LOGIN'
-                                  }
-                              }
-                          }
-                      }
-                  }
-                """)
-                sandbox()
-              }
-            }
-          }
-    credentials:
-      system:
-        domainCredentials:
-          - credentials:
-              - string:
-                  scope: GLOBAL
-                  id: 'sonarqube-token'
-                  description: 'SonarQube token'
-                  secret: "\${SONARQUBE_TOKEN}"
-    installPlugins:
-      - blueocean:latest
-      - git:latest
-      - workflow-aggregator:latest
-      - configuration-as-code:latest
-      - sonar:latest
-      - pipeline-github-lib:latest
-      - github:latest
-      - workflow-multibranch:latest
-      - workflow-cps:latest
-    `;
-
-    // Escape special characters in configContent
-    const escapedConfigContent = configContent
-      .replace(/\\/g, '\\\\')
-      .replace(/`/g, '\\`')
-      .replace(/\$/g, '\\$')
-      .replace(/"/g, '\\"');
-
     // Create a Fargate Task Definition
     const taskDefinition = new ecs.FargateTaskDefinition(this, `${id}TaskDef`, {
+      runtimePlatform: {
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+        cpuArchitecture: ecs.CpuArchitecture.X86_64,
+      },
       memoryLimitMiB: 4096,
       cpu: 1024,
       taskRole,
       executionRole,
     });
 
+    const asset = new ecrassets.DockerImageAsset(this, `${id}DockerImage`, {
+      directory: `${__dirname}/../../docker/jenkins/`,
+      platform: ecrassets.Platform.LINUX_AMD64,
+    });
+    const image = ecs.ContainerImage.fromDockerImageAsset(asset);
+
     // Add Jenkins container to the task definition
     const container = taskDefinition.addContainer(`${id}Container`, {
-      image: ecs.ContainerImage.fromRegistry('jenkins/jenkins:lts'),
+      image,
       containerName: 'jenkins',
       environment: {
         JAVA_OPTS: '-Djenkins.install.runSetupWizard=false',
-        SONAR_HOST_URL: props.sonarQubeUrl,
+        SONAR_HOST_URL: props.sonarqubeUrl,
+        CASC_JENKINS_CONFIG: '/usr/share/jenkins/ref/jenkins.yaml',
       },
       secrets: {
         JENKINS_ADMIN_USERNAME: ecs.Secret.fromSecretsManager(adminSecret, 'username'),
         JENKINS_ADMIN_PASSWORD: ecs.Secret.fromSecretsManager(adminSecret, 'password'),
-        SONARQUBE_TOKEN: ecs.Secret.fromSecretsManager(sonarqubeTokenSecret, 'token'),
+        SONAR_TOKEN: ecs.Secret.fromSecretsManager(props.sonarqubeTokenSecret, 'token'),
       },
-      logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'Jenkins' }),
-      entryPoint: ['/bin/sh', '-c'],
-      command: [
-        `
-        mkdir -p /var/jenkins_home/casc_configs && \
-        echo "${escapedConfigContent}" > /var/jenkins_home/casc_configs/jenkins.yaml && \
-        jenkins-plugin-cli --plugins "configuration-as-code:latest git:latest blueocean:latest sonar:latest pipeline-github-lib:latest github:latest workflow-aggregator:latest workflow-multibranch:latest workflow-cps:latest" && \
-        /usr/bin/tini -- /usr/local/bin/jenkins.sh
-        `,
-      ],
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: 'Jenkins',
+      }),
     });
 
     container.addPortMappings({

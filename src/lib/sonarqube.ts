@@ -29,6 +29,10 @@ export class SonarQube extends cdk.Stack {
   public readonly sonarSecurityGroup: ec2.SecurityGroup;
   public readonly project: codebuild.Project;
 
+  public readonly sonarAdminSecret: sm.ISecret;
+  public readonly sonarJenkinsSecret: sm.ISecret;
+  public readonly sonarCodeBuildSecret: sm.ISecret;
+
   constructor(scope: Construct, id: string, props: SonarQubeProps) {
     super(scope, id, props);
 
@@ -243,7 +247,7 @@ export class SonarQube extends cdk.Stack {
     });
 
     // SonarQube admin secret
-    const sonarAdminSecret = new sm.Secret(this, `${id}AdminSecret`, {
+    this.sonarAdminSecret = new sm.Secret(this, `${id}AdminSecret`, {
       secretName: `${id}AdminSecret`,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({
@@ -256,7 +260,7 @@ export class SonarQube extends cdk.Stack {
     });
 
     // SonarQube Jenkins service account secret
-    const sonarJenkinsSecret = new sm.Secret(this, `${id}JenkinsSecret`, {
+    this.sonarJenkinsSecret = new sm.Secret(this, `${id}JenkinsSecret`, {
       secretName: `${id}JenkinsSecret`,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({
@@ -269,7 +273,7 @@ export class SonarQube extends cdk.Stack {
     });
 
     // SonarQube CodeBuild service account secret
-    const sonarCodeBuildSecret = new sm.Secret(this, `${id}CodeBuildSecret`, {
+    this.sonarCodeBuildSecret = new sm.Secret(this, `${id}CodeBuildSecret`, {
       secretName: `${id}CodeBuildSecret`,
       generateSecretString: {
         secretStringTemplate: JSON.stringify({
@@ -291,11 +295,11 @@ export class SonarQube extends cdk.Stack {
     });
 
     // Grant Lambda function permissions to read and write secrets
-    sonarAdminSecret.grantRead(lambdaRole);
-    sonarJenkinsSecret.grantRead(lambdaRole);
-    sonarJenkinsSecret.grantWrite(lambdaRole);
-    sonarCodeBuildSecret.grantRead(lambdaRole);
-    sonarCodeBuildSecret.grantWrite(lambdaRole);
+    this.sonarAdminSecret.grantRead(lambdaRole);
+    this.sonarJenkinsSecret.grantRead(lambdaRole);
+    this.sonarJenkinsSecret.grantWrite(lambdaRole);
+    this.sonarCodeBuildSecret.grantRead(lambdaRole);
+    this.sonarCodeBuildSecret.grantWrite(lambdaRole);
 
     // Lambda function to automate SonarQube onboarding
     const lambdaFunction = new lambdanode.NodejsFunction(this, `${id}OnboardingFunction`, {
@@ -310,9 +314,9 @@ export class SonarQube extends cdk.Stack {
       role: lambdaRole,
       environment: {
         SONAR_URL: `http://${this.loadBalancer.loadBalancerDnsName}`,
-        SONAR_ADMIN_SECRET_ARN: sonarAdminSecret.secretArn,
-        SONAR_JENKINS_SECRET_ARN: sonarJenkinsSecret.secretArn,
-        SONAR_CODEBUILD_SECRET_ARN: sonarCodeBuildSecret.secretArn,
+        SONAR_ADMIN_SECRET_ARN: this.sonarAdminSecret.secretArn,
+        SONAR_JENKINS_SECRET_ARN: this.sonarJenkinsSecret.secretArn,
+        SONAR_CODEBUILD_SECRET_ARN: this.sonarCodeBuildSecret.secretArn,
       },
     });
 
@@ -344,7 +348,7 @@ export class SonarQube extends cdk.Stack {
     });
 
     // Grant CodeBuild permissions to read the SonarQube service account secret
-    sonarCodeBuildSecret.grantRead(codeBuildRole);
+    this.sonarCodeBuildSecret.grantRead(codeBuildRole);
 
     // CodeBuild project for running SonarQube analysis
     this.project = new codebuild.Project(this, `${id}Project`, {
@@ -369,7 +373,7 @@ export class SonarQube extends cdk.Stack {
           },
           SONAR_LOGIN_SECRET_NAME: {
             type: codebuild.BuildEnvironmentVariableType.PLAINTEXT,
-            value: sonarCodeBuildSecret.secretName,
+            value: this.sonarCodeBuildSecret.secretName,
           },
         },
       },

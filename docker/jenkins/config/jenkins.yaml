@@ -1,0 +1,65 @@
+jenkins:
+  systemMessage: 'Jenkins configured automatically by Configuration as Code plugin'
+  numExecutors: 2
+  slaveAgentPort: 50000
+  agentProtocols:
+    - JNLP4-connect
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: '${JENKINS_ADMIN_USERNAME}'
+          password: '${JENKINS_ADMIN_PASSWORD}'
+
+credentials:
+  system:
+    domainCredentials:
+      - domain:
+          name: 'global'
+          description: 'Global domain for credentials'
+        credentials:
+          - string:
+              scope: GLOBAL
+              id: 'sonarqube-token'
+              description: 'SonarQube token for authentication'
+              secret: '${SONAR_TOKEN}'
+
+jobs:
+  - script: |
+      pipelineJob('Build-Petclinic') {
+          definition {
+              cps {
+                  script('''
+                      pipeline {
+                          agent any
+                          stages {
+                              stage('Checkout') {
+                                  steps {
+                                      git url: 'https://github.com/spring-projects/spring-petclinic.git', branch: 'main'
+                                  }
+                              }
+                              stage('Build') {
+                                  steps {
+                                      sh './mvnw clean package'
+                                      sh 'java -jar target/*.jar --server.port=8081 &'
+                                  }
+                              }
+                              stage('SonarQube Analysis') {
+                                  environment {
+                                      SONAR_HOST_URL = '${SONAR_HOST_URL}'
+                                      SONAR_TOKEN = credentials('sonarqube-token')
+                                  }
+                                  steps {
+                                      sh './mvnw sonar:sonar -Dsonar.projectKey=spring-petclinic -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_TOKEN'
+                                  }
+                              }
+                          }
+                      }
+                  ''')
+                  sandbox()
+              }
+          }
+      }

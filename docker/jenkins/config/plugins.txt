@@ -1,0 +1,14 @@
+configuration-as-code:latest
+workflow-aggregator:latest
+workflow-cps:latest
+workflow-multibranch:latest
+amazon-ecs:latest
+pipeline-aws:latest
+git:latest
+github:latest
+job-dsl:latest
+blueocean:latest
+sonar:latest
+credentials:latest
+job-dsl:latest
+sse-gateway:latest
