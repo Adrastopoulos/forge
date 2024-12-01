@@ -8,7 +8,7 @@ git:latest
 github:latest
 job-dsl:latest
 blueocean:latest
-sonar:latest
+sonar:2.17.3
 credentials:latest
 job-dsl:latest
 sse-gateway:latest
