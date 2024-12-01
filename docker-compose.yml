@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  jenkins:
+    build:
+      context: docker/jenkins
+      dockerfile: Dockerfile
+    ports:
+      - '8080:8080'
+      - '9090:9090'
+    environment:
+      - JENKINS_ADMIN_USERNAME=admin
+      - JENKINS_ADMIN_PASSWORD=admin
+      - SONAR_HOST_URL=http://sonarq-sonar-ntjiqxncmqiu-1248257985.us-east-1.elb.amazonaws.com
+      - SONAR_TOKEN=squ_0ebecca4ad546d1f5c349ba317478c4512ffde1d
+      - CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/jenkins.yaml

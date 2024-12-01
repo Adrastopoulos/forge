@@ -11,6 +11,7 @@ commitlint.config.cjs
 tailwind.config.cjs
 postcss.config.cjs
 next.config.mjs
+.prettierrc.mjs
 
 .eslintcache
 

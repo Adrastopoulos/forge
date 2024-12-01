@@ -4,7 +4,7 @@
   "scripts": {
     "diff": "cdk diff",
     "format": "prettier --check . --ignore-path ./.prettierignore",
-    "lint": "eslint .",
+    "lint": "eslint \"src/**/*\"",
     "synth": "cdk synth",
     "typecheck": "tsc --noEmit"
   },
@@ -29,12 +29,6 @@
     "prettier": "^3.3.3",
     "tsx": "^4.11.0",
     "typescript": "^5.7.2"
-  },
-  "eslintConfig": {
-    "root": true,
-    "extends": [
-      "./eslint.config.mjs"
-    ]
   },
   "prettier": "./.prettierrc.mjs"
 }
