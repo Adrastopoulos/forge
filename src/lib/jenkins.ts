@@ -183,7 +183,7 @@ export class Jenkins extends cdk.Stack {
     this.service = new ecs.FargateService(this, `${id}Service`, {
       cluster,
       taskDefinition,
-      desiredCount: 1,
+      desiredCount: 2,
       securityGroups: [this.jenkinsSecurityGroup],
       assignPublicIp: true,
       vpcSubnets: {
