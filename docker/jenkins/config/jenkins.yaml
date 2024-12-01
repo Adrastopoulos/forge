@@ -55,13 +55,6 @@ jobs:
                                       sh './mvnw sonar:sonar -Dsonar.projectKey=spring-petclinic -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_TOKEN'
                                   }
                               }
-                              stage('Run PetClinic') {
-                                    steps {
-                                        sh 'java -jar target/*.jar --server.port=9090 &'
-                                        sh 'sleep 30' // Wait for app to start
-                                        echo 'PetClinic is running on port 9090'
-                                    }
-                              }
                           }
                       }
                   ''')

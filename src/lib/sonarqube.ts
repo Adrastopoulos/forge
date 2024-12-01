@@ -1,5 +1,6 @@
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import type { Construct } from 'constructs';
 import cdk from 'aws-cdk-lib';
 import codebuild from 'aws-cdk-lib/aws-codebuild';
 import ec2 from 'aws-cdk-lib/aws-ec2';
@@ -14,7 +15,6 @@ import lambdanode from 'aws-cdk-lib/aws-lambda-nodejs';
 import rds from 'aws-cdk-lib/aws-rds';
 import sm from 'aws-cdk-lib/aws-secretsmanager';
 import cr from 'aws-cdk-lib/custom-resources';
-import { Construct } from 'constructs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

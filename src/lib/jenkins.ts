@@ -1,3 +1,4 @@
+import type { Construct } from 'constructs';
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecrassets from 'aws-cdk-lib/aws-ecr-assets';
@@ -6,7 +7,6 @@ import * as efs from 'aws-cdk-lib/aws-efs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-import { Construct } from 'constructs';
 
 const __dirname = new URL('.', import.meta.url).pathname;
 
@@ -20,11 +20,13 @@ export class Jenkins extends cdk.Stack {
   public readonly service: ecs.FargateService;
   public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
   public readonly jenkinsSecurityGroup: ec2.SecurityGroup;
+  public readonly fileSystem: efs.IFileSystem;
 
   constructor(scope: Construct, id: string, props: JenkinsProps) {
     super(scope, id, props);
 
     const JENKINS_PORT = 8080;
+    const PETCLINIC_PORT = 9090;
 
     // Create a security group for Jenkins
     this.jenkinsSecurityGroup = new ec2.SecurityGroup(this, `${id}SecurityGroup`, {
@@ -38,6 +40,12 @@ export class Jenkins extends cdk.Stack {
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(80),
       'Allow HTTP access to Jenkins'
+    );
+
+    this.jenkinsSecurityGroup.addIngressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(PETCLINIC_PORT),
+      'Allow PetClinic access'
     );
 
     // Create an ECS cluster
@@ -79,7 +87,7 @@ export class Jenkins extends cdk.Stack {
       allowAllOutbound: true,
     });
 
-    const fileSystem = new efs.FileSystem(this, `${id}EfsFileSystem`, {
+    this.fileSystem = new efs.FileSystem(this, `${id}EfsFileSystem`, {
       vpc: props.vpc,
       removalPolicy: cdk.RemovalPolicy.DESTROY, // Change to RETAIN for production
       performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
@@ -96,7 +104,7 @@ export class Jenkins extends cdk.Stack {
 
     // Create an Access Point
     const accessPoint = new efs.AccessPoint(this, `${id}EfsAccessPoint`, {
-      fileSystem,
+      fileSystem: this.fileSystem,
       path: '/jenkins',
       posixUser: {
         uid: '1000',
@@ -144,18 +152,19 @@ export class Jenkins extends cdk.Stack {
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: 'Jenkins',
       }),
-    });
-
-    container.addPortMappings({
-      containerPort: JENKINS_PORT,
-      protocol: ecs.Protocol.TCP,
+      portMappings: [
+        {
+          containerPort: JENKINS_PORT,
+          protocol: ecs.Protocol.TCP,
+        },
+      ],
     });
 
     // Mount the EFS volume in the container
     taskDefinition.addVolume({
       name: 'jenkins-home',
       efsVolumeConfiguration: {
-        fileSystemId: fileSystem.fileSystemId,
+        fileSystemId: this.fileSystem.fileSystemId,
         transitEncryption: 'ENABLED',
         authorizationConfig: {
           accessPointId: accessPoint.accessPointId,
@@ -183,10 +192,10 @@ export class Jenkins extends cdk.Stack {
     });
 
     // Allow the ECS task to use the EFS file system
-    fileSystem.connections.allowDefaultPortFrom(this.service.connections);
+    this.fileSystem.connections.allowDefaultPortFrom(this.service.connections);
 
     // Ensure the task role can mount the EFS file system
-    fileSystem.grant(taskRole, 'elasticfilesystem:ClientMount', 'elasticfilesystem:ClientWrite');
+    this.fileSystem.grant(taskRole, 'elasticfilesystem:ClientMount', 'elasticfilesystem:ClientWrite');
 
     // Create an Application Load Balancer
     this.loadBalancer = new elbv2.ApplicationLoadBalancer(this, `${id}LB`, {
@@ -220,9 +229,67 @@ export class Jenkins extends cdk.Stack {
       },
     });
 
-    // Output the Jenkins URL
+    // Add PetClinic container to the same task definition
+    const petclinicContainer = taskDefinition.addContainer('PetClinicContainer', {
+      image: ecs.ContainerImage.fromRegistry('eclipse-temurin:17-jdk-jammy'), // Base Java image
+      containerName: 'petclinic',
+      essential: false, // So Jenkins container remains primary
+      command: [
+        'sh',
+        '-c',
+        'while [ ! -f /var/jenkins_home/workspace/Build-Petclinic/target/*.jar ]; do sleep 10; done; java -jar /var/jenkins_home/workspace/Build-Petclinic/target/*.jar --server.port=9090',
+      ],
+      portMappings: [
+        {
+          containerPort: 9090,
+          protocol: ecs.Protocol.TCP,
+        },
+      ],
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: 'PetClinic',
+      }),
+    });
+
+    // Share Jenkins home volume with PetClinic container
+    petclinicContainer.addMountPoints({
+      sourceVolume: 'jenkins-home',
+      containerPath: '/var/jenkins_home',
+      readOnly: true,
+    });
+
+    // Create a listener for PetClinic on the ALB
+    const petclinicListener = this.loadBalancer.addListener(`${id}PetclinicListener`, {
+      port: PETCLINIC_PORT,
+      open: true,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+    });
+
+    // Add PetClinic target
+    petclinicListener.addTargets(`${id}PetclinicTargetGroup`, {
+      port: PETCLINIC_PORT,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targets: [
+        this.service.loadBalancerTarget({
+          containerName: 'petclinic',
+          containerPort: PETCLINIC_PORT,
+          protocol: ecs.Protocol.TCP,
+        }),
+      ],
+      healthCheck: {
+        path: '/',
+        interval: cdk.Duration.seconds(60),
+        timeout: cdk.Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 5,
+      },
+    });
+
     new cdk.CfnOutput(this, `${id}Url`, {
       value: `http://${this.loadBalancer.loadBalancerDnsName}`,
+    });
+
+    new cdk.CfnOutput(this, `${id}PetClinicUrl`, {
+      value: `http://${this.loadBalancer.loadBalancerDnsName}:${PETCLINIC_PORT}`,
     });
   }
 }

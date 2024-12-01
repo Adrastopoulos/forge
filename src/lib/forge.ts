@@ -1,6 +1,6 @@
+import type { Construct } from 'constructs';
 import cdk from 'aws-cdk-lib';
 import ec2 from 'aws-cdk-lib/aws-ec2';
-import { Construct } from 'constructs';
 
 export class Forge extends cdk.Stack {
   public vpc: ec2.IVpc;

@@ -1,3 +1,6 @@
 What are the potential build/testing stages in CI practices and explain the purpose?
 
-Coding: 1.5hrs
+Coding: 12hrs
+Design: 5hrs
+Tool usage: 4hrs
+Learning tool: 4hrs
