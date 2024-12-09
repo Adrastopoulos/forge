@@ -2,3 +2,5 @@ node_modules
 *.tsbuildinfo
 cdk.out
 .env
+submission
+*.zip
