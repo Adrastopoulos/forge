@@ -14,6 +14,8 @@ export interface JenkinsProps extends cdk.StackProps {
   vpc: ec2.IVpc;
   sonarqubeUrl: string;
   sonarqubeTokenSecret: secretsmanager.ISecret;
+  webServerKeyPair: ec2.KeyPair;
+  webServerIp: string;
 }
 
 export class Jenkins extends cdk.Stack {
@@ -26,7 +28,6 @@ export class Jenkins extends cdk.Stack {
     super(scope, id, props);
 
     const JENKINS_PORT = 8080;
-    const PETCLINIC_PORT = 9090;
 
     // Create a security group for Jenkins
     this.jenkinsSecurityGroup = new ec2.SecurityGroup(this, `${id}SecurityGroup`, {
@@ -42,12 +43,6 @@ export class Jenkins extends cdk.Stack {
       'Allow HTTP access to Jenkins'
     );
 
-    this.jenkinsSecurityGroup.addIngressRule(
-      ec2.Peer.anyIpv4(),
-      ec2.Port.tcp(PETCLINIC_PORT),
-      'Allow PetClinic access'
-    );
-
     // Create an ECS cluster
     const cluster = new ecs.Cluster(this, `${id}Cluster`, {
       vpc: props.vpc,
@@ -57,6 +52,13 @@ export class Jenkins extends cdk.Stack {
     const taskRole = new iam.Role(this, `${id}TaskRole`, {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
+
+    taskRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: ['*'],
+      })
+    );
 
     const executionRole = new iam.Role(this, `${id}ExecutionRole`, {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -143,11 +145,13 @@ export class Jenkins extends cdk.Stack {
         JAVA_OPTS: '-Djenkins.install.runSetupWizard=false',
         SONAR_HOST_URL: props.sonarqubeUrl,
         CASC_JENKINS_CONFIG: '/usr/share/jenkins/ref/jenkins.yaml',
+        WEB_SERVER_IP: props.webServerIp,
       },
       secrets: {
         JENKINS_ADMIN_USERNAME: ecs.Secret.fromSecretsManager(adminSecret, 'username'),
         JENKINS_ADMIN_PASSWORD: ecs.Secret.fromSecretsManager(adminSecret, 'password'),
         SONAR_TOKEN: ecs.Secret.fromSecretsManager(props.sonarqubeTokenSecret, 'token'),
+        WEB_SERVER_PRIVATE_KEY: ecs.Secret.fromSsmParameter(props.webServerKeyPair.privateKey),
       },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: 'Jenkins',
@@ -183,7 +187,7 @@ export class Jenkins extends cdk.Stack {
     this.service = new ecs.FargateService(this, `${id}Service`, {
       cluster,
       taskDefinition,
-      desiredCount: 2,
+      desiredCount: 1,
       securityGroups: [this.jenkinsSecurityGroup],
       assignPublicIp: true,
       vpcSubnets: {
@@ -229,67 +233,8 @@ export class Jenkins extends cdk.Stack {
       },
     });
 
-    // Add PetClinic container to the same task definition
-    const petclinicContainer = taskDefinition.addContainer('PetClinicContainer', {
-      image: ecs.ContainerImage.fromRegistry('eclipse-temurin:17-jdk-jammy'), // Base Java image
-      containerName: 'petclinic',
-      essential: false, // So Jenkins container remains primary
-      command: [
-        'sh',
-        '-c',
-        'while [ ! -f /var/jenkins_home/workspace/Build-Petclinic/target/*.jar ]; do sleep 10; done; java -jar /var/jenkins_home/workspace/Build-Petclinic/target/*.jar --server.port=9090',
-      ],
-      portMappings: [
-        {
-          containerPort: 9090,
-          protocol: ecs.Protocol.TCP,
-        },
-      ],
-      logging: ecs.LogDrivers.awsLogs({
-        streamPrefix: 'PetClinic',
-      }),
-    });
-
-    // Share Jenkins home volume with PetClinic container
-    petclinicContainer.addMountPoints({
-      sourceVolume: 'jenkins-home',
-      containerPath: '/var/jenkins_home',
-      readOnly: true,
-    });
-
-    // Create a listener for PetClinic on the ALB
-    const petclinicListener = this.loadBalancer.addListener(`${id}PetclinicListener`, {
-      port: PETCLINIC_PORT,
-      open: true,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-    });
-
-    // Add PetClinic target
-    petclinicListener.addTargets(`${id}PetclinicTargetGroup`, {
-      port: PETCLINIC_PORT,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      targets: [
-        this.service.loadBalancerTarget({
-          containerName: 'petclinic',
-          containerPort: PETCLINIC_PORT,
-          protocol: ecs.Protocol.TCP,
-        }),
-      ],
-      healthCheck: {
-        path: '/',
-        interval: cdk.Duration.seconds(60),
-        timeout: cdk.Duration.seconds(5),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 5,
-      },
-    });
-
     new cdk.CfnOutput(this, `${id}Url`, {
       value: `http://${this.loadBalancer.loadBalancerDnsName}`,
-    });
-
-    new cdk.CfnOutput(this, `${id}PetClinicUrl`, {
-      value: `http://${this.loadBalancer.loadBalancerDnsName}:${PETCLINIC_PORT}`,
     });
   }
 }

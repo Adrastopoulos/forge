@@ -4,6 +4,7 @@ import { Forge as ForgeStack } from "../lib/forge";
 
 import { SonarQube } from "../lib/sonarqube";
 import { Jenkins } from "../lib/jenkins";
+import { WebServer } from "../lib/webserver";
 
 const app = new cdk.App();
 
@@ -21,9 +22,16 @@ const sonarqube = new SonarQube(app, "SonarQube", {
   vpc: forgeStack.vpc,
 });
 
+const webserver = new WebServer(app, "WebServer", {
+  env,
+  vpc: forgeStack.vpc,
+})
+
 const jenkins = new Jenkins(app, "Jenkins", {
   env,
   vpc: forgeStack.vpc,
   sonarqubeUrl: `http://${sonarqube.loadBalancer.loadBalancerDnsName}`,
   sonarqubeTokenSecret: sonarqube.sonarJenkinsSecret,
+  webServerKeyPair: webserver.keyPair,
+  webServerIp: webserver.instance.instancePublicIp,
 });

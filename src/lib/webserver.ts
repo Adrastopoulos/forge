@@ -10,7 +10,7 @@ interface ProductionServerProps extends cdk.StackProps {
 export class WebServer extends cdk.Stack {
   public readonly instance: ec2.Instance;
   public readonly securityGroup: ec2.SecurityGroup;
-  public readonly keyPair: ec2.IKeyPair;
+  public readonly keyPair: ec2.KeyPair;
 
   constructor(scope: Construct, id: string, props: ProductionServerProps) {
     super(scope, id, props);

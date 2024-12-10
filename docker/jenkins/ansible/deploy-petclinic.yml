@@ -1,0 +1,32 @@
+- name: Deploy Petclinic to production web server
+  hosts: all
+  become: yes
+  tasks:
+    - name: Stop any existing Petclinic
+      shell: |
+        pids=$(pgrep -f spring-petclinic) || echo "No process found"
+        if [ -n "$pids" ]; then
+          kill -15 $pids
+          sleep 2
+          if pgrep -f spring-petclinic; then
+            kill -9 $pids
+          fi
+        else
+          echo "No process found to kill"
+        fi
+      register: result
+      failed_when: false
+
+    - name: Remove old jar
+      file:
+        path: /opt/petclinic/spring-petclinic.jar
+        state: absent
+
+    - name: Copy Petclinic jar from control machine to target
+      copy:
+        src: /var/lib/jenkins/workspace/petclinic/target/spring-petclinic-2.7.0.jar
+        dest: /opt/petclinic/spring-petclinic.jar
+        mode: '0755'
+
+    - name: Start Petclinic application
+      shell: 'nohup java -jar /opt/petclinic/spring-petclinic.jar > /opt/petclinic/petclinic.log 2>&1 &'

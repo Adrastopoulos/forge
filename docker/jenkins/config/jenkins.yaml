@@ -26,13 +26,21 @@ credentials:
               id: 'sonarqube-token'
               description: 'SonarQube token for authentication'
               secret: '${SONAR_TOKEN}'
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: 'web-server-ssh-key'
+              username: 'ec2-user' # default user for amazon linux
+              description: 'SSH private key for Production Web Server'
+              privateKeySource:
+                directEntry:
+                  privateKey: '${WEB_SERVER_PRIVATE_KEY}'
 
 jobs:
   - script: |
-      pipelineJob('Build-Petclinic') {
+      pipelineJob('Build-Deploy-Petclinic') {
           definition {
               cps {
-                  script('''
+                  script("""
                       pipeline {
                           agent any
                           stages {
@@ -46,18 +54,25 @@ jobs:
                                       sh './mvnw clean package'
                                   }
                               }
-                              stage('SonarQube Analysis') {
+                              stage('Deploy') {
                                   environment {
-                                      SONAR_HOST_URL = '${SONAR_HOST_URL}'
-                                      SONAR_TOKEN = credentials('sonarqube-token')
+                                      WEB_SERVER_IP = '${WEB_SERVER_IP}'
+                                      SSH_KEY_FILE = credentials('web-server-ssh-key')
                                   }
                                   steps {
-                                      sh './mvnw sonar:sonar -Dsonar.projectKey=spring-petclinic -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_TOKEN'
+                                      sh '''
+                                      echo "$WEB_SERVER_PRIVATE_KEY" > /tmp/web_server_key.pem
+                                      chmod 400 /tmp/web_server_key.pem
+                                      echo "Starting deployment..."
+                                      ansible-playbook -i "$WEB_SERVER_IP," /usr/share/ansible/deploy-petclinic.yml \
+                                        --private-key /tmp/web_server_key.pem -u ec2-user
+                                      echo "Deployment complete."
+                                      '''
                                   }
                               }
                           }
                       }
-                  ''')
+                  """)
                   sandbox()
               }
           }
