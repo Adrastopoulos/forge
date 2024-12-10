@@ -30,7 +30,17 @@ export class WebServer extends cdk.Stack {
     role.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore'));
 
     const userData = ec2.UserData.forLinux();
-    userData.addCommands('apt-get update -y', 'apt-get install -y openjdk-17-jdk', 'mkdir -p /opt/petclinic');
+    userData.addCommands(
+      'yum update -y', // Update the package manager
+      'amazon-linux-extras enable corretto17', // Enable Amazon Corretto 17 repository
+      'yum install -y java-17-amazon-corretto', // Install Amazon Corretto 17
+      'mkdir -p /opt/petclinic', // Create the directory for Petclinic
+      'chown ec2-user:ec2-user /opt/petclinic', // Set correct permissions for the directory
+      'chmod 755 /opt/petclinic', // Ensure proper permissions for the directory
+      'touch /opt/petclinic/petclinic.log', // Create the log file
+      'chown ec2-user:ec2-user /opt/petclinic/petclinic.log', // Set correct ownership for the log file
+      'chmod 644 /opt/petclinic/petclinic.log' // Ensure the log file has proper permissions
+    );
 
     this.keyPair = new ec2.KeyPair(this, `${id}KeyPair`, {
       keyPairName: `${id}KeyPair`,
