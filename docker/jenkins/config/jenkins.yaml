@@ -51,7 +51,11 @@ jobs:
                               }
                               stage('Build') {
                                   steps {
-                                      sh './mvnw clean package'
+                                      sh '''
+                                      ./mvnw package
+                                      echo "Copying JAR to shared location..."
+                                      cp target/*.jar /usr/share/ansible/petclinic.jar
+                                      '''
                                   }
                               }
                               stage('Deploy') {

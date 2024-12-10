@@ -24,7 +24,7 @@
 
     - name: Copy Petclinic jar from control machine to target
       copy:
-        src: /var/lib/jenkins/workspace/petclinic/target/spring-petclinic-2.7.0.jar
+        src: /usr/share/ansible/petclinic.jar
         dest: /opt/petclinic/spring-petclinic.jar
         mode: '0755'
 
